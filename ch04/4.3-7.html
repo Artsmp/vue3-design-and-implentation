@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>调度器控制副作用函数执行次数</title>
+  </head>
+  <body>
+    <script>
+      const data = { num: 1, count: 2 };
+      const bucket = new WeakMap();
+      let activeEffect;
+      const effectStack = [];
+
+      function cleanup(effectFn) {
+        for (let i = 0; i < effectFn.deps.length; i++) {
+          const deps = effectFn.deps[i];
+          deps.delete(effectFn);
+        }
+        effectFn.deps.length = 0;
+      }
+      function effect(fn, options = {}) {
+        const effectFn = () => {
+          cleanup(effectFn);
+          activeEffect = effectFn;
+          effectStack.push(effectFn);
+          fn();
+          effectStack.pop();
+          activeEffect = effectStack[effectStack.length - 1];
+        };
+        effectFn.deps = [];
+        effectFn.options = options;
+        effectFn();
+      }
+      const obj = new Proxy(data, {
+        get(target, key) {
+          track(target, key);
+          return target[key];
+        },
+        set(target, key, newVal) {
+          target[key] = newVal;
+          trigger(target, key);
+        },
+      });
+
+      function track(target, key) {
+        if (!activeEffect) return;
+        let depsMap = bucket.get(target);
+        if (!depsMap) {
+          bucket.set(target, (depsMap = new Map()));
+        }
+        let deps = depsMap.get(key);
+        if (!deps) {
+          depsMap.set(key, (deps = new Set()));
+        }
+        deps.add(activeEffect);
+        activeEffect.deps.push(deps);
+      }
+
+      function trigger(target, key) {
+        const depsMap = bucket.get(target);
+        if (!depsMap) return;
+        const effects = depsMap.get(key);
+        const effectsToRun = new Set();
+        // 如果当前激活的activeEffect与触发重新执行的effect相同则，则不触发执行
+        effects &&
+          effects.forEach((effectFn) => {
+            if (effectFn !== activeEffect) {
+              effectsToRun.add(effectFn);
+            }
+          });
+        effectsToRun.forEach((fn) => {
+          if (fn.options.schedular) {
+            fn.options.schedular(fn);
+          } else {
+            fn();
+          }
+        });
+      }
+      // 同一个副作用函数只保存一个，也就是只执行一次
+      const jobQueue = new Set();
+      const p = Promise.resolve();
+      let isFlushing = false;
+      function flushJob() {
+        if (isFlushing) return;
+        isFlushing = true;
+        p.then(() => {
+          jobQueue.forEach((job) => job());
+        }).finally(() => {
+          isFlushing = false;
+          jobQueue.clear();
+        });
+      }
+
+      const schedular = (fn) => {
+        jobQueue.add(fn);
+        flushJob();
+      };
+
+      effect(
+        () => {
+          console.log('执行副作用函数==obj.count', obj.count);
+        },
+        {
+          // 实现调度器功能，把执行时机交给用户
+          schedular,
+        }
+      );
+
+      effect(
+        () => {
+          console.log('执行副作用函数==obj.num', obj.num);
+        },
+        {
+          // 实现调度器功能，把执行时机交给用户
+          schedular,
+        }
+      );
+
+      obj.num++;
+      obj.num++;
+      obj.num++;
+      obj.num++;
+      obj.num++;
+      obj.count++;
+      obj.count++;
+      obj.count++;
+      obj.count++;
+
+      setTimeout(() => {
+        obj.count++;
+        obj.count++;
+        obj.count++;
+        obj.count++;
+      }, 3000);
+    </script>
+  </body>
+</html>

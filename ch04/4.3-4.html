@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>解决effect嵌套问题</title>
+  </head>
+  <body>
+    <script>
+      const data = { text: 'hello world', text2: ' hello vue3' };
+      const bucket = new WeakMap();
+      let activeEffect;
+      const effectStack = [];
+
+      function cleanup(effectFn) {
+        for (let i = 0; i < effectFn.deps.length; i++) {
+          const deps = effectFn.deps[i];
+          deps.delete(effectFn);
+        }
+        effectFn.deps.length = 0;
+      }
+      function effect(fn) {
+        const effectFn = () => {
+          cleanup(effectFn);
+          activeEffect = effectFn;
+          effectStack.push(effectFn);
+          fn();
+          effectStack.pop();
+          activeEffect = effectStack[effectStack.length - 1];
+        };
+        effectFn.deps = [];
+        effectFn();
+      }
+      const obj = new Proxy(data, {
+        get(target, key) {
+          track(target, key);
+          return target[key];
+        },
+        set(target, key, newVal) {
+          target[key] = newVal;
+          trigger(target, key);
+        },
+      });
+
+      function track(target, key) {
+        if (!activeEffect) return;
+        let depsMap = bucket.get(target);
+        if (!depsMap) {
+          bucket.set(target, (depsMap = new Map()));
+        }
+        let deps = depsMap.get(key);
+        if (!deps) {
+          depsMap.set(key, (deps = new Set()));
+        }
+        deps.add(activeEffect);
+        activeEffect.deps.push(deps);
+      }
+
+      function trigger(target, key) {
+        const depsMap = bucket.get(target);
+        if (!depsMap) return;
+        const effects = depsMap.get(key);
+        const effectsToRun = new Set(effects);
+        effectsToRun.forEach((fn) => fn());
+      }
+
+      effect(() => {
+        document.body.append(document.createTextNode(obj.text));
+        effect(() => {
+          document.body.append(document.createTextNode(obj.text2));
+        });
+      });
+
+      setTimeout(() => {
+        obj.text2 = 'hello world 4';
+        obj.text2 = 'hello world 5';
+        obj.text2 = 'hello world 6';
+      }, 2000);
+    </script>
+  </body>
+</html>

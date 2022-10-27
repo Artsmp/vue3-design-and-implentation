@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>设计一个完善的响应式系统1</title>
+  </head>
+  <body>
+    <script>
+      const data = { text: 'hello world' };
+      const bucket = new Set();
+      let activeEffect;
+      function effect(fn) {
+        activeEffect = fn;
+        fn();
+        activeEffect = undefined;
+      }
+      const obj = new Proxy(data, {
+        get(target, key) {
+          if (activeEffect) {
+            bucket.add(activeEffect);
+          }
+          return target[key];
+        },
+        set(target, key, newVal) {
+          target[key] = newVal;
+          bucket.forEach((fn) => fn());
+          return true;
+        },
+      });
+
+      effect(() => {
+        document.body.innerText = obj.text;
+      });
+
+      setTimeout(() => {
+        obj.text = 'hello vue3';
+      }, 1000);
+    </script>
+  </body>
+</html>
