@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>实现过期回调逻辑</title>
+  </head>
+  <body>
+    <h4>
+      使用闭包来保存上一次watch更新回调的onInvalidate回调，假如你下次更新的时间少于1000ms，那你下次执行回调的时候就会调用清除回调，
+      而这个清除回调执行的是上一次的处理逻辑。但是如果你下次watch的数据更新时间大于1000ms，则即使调用了上次的cleanup，但上次的回调已经完整执行完了，
+      不会再受到你的影响（前提是这个onInvalidate回调中不能有副作用了（例如改变非当前上下文之外的变量））
+    </h4>
+    <script>
+      const data = { num: 1, count: 2 };
+      const bucket = new WeakMap();
+      let activeEffect;
+      const effectStack = [];
+
+      function cleanup(effectFn) {
+        for (let i = 0; i < effectFn.deps.length; i++) {
+          const deps = effectFn.deps[i];
+          deps.delete(effectFn);
+        }
+        effectFn.deps.length = 0;
+      }
+      function effect(fn, options = {}) {
+        const effectFn = () => {
+          cleanup(effectFn);
+          activeEffect = effectFn;
+          effectStack.push(effectFn);
+          // 把fn看做一个getter函数
+          const res = fn();
+          effectStack.pop();
+          activeEffect = effectStack[effectStack.length - 1];
+          return res;
+        };
+        effectFn.deps = [];
+        effectFn.options = options;
+        // 如果懒执行，则默认第一次不会执行
+        if (!options.lazy) {
+          effectFn();
+        }
+        // 返回副作用函数，用户可以手动执行
+        return effectFn;
+      }
+
+      function computed(getter) {
+        // 用来缓存上一次的值
+        let cache;
+        // 是否为脏，脏则需要重新计算
+        let dirty = true;
+        const effectFn = effect(getter, {
+          lazy: true,
+          schedular() {
+            dirty = true;
+            // 当计算属性变化时手动调用trigger函数触发外层函数更新
+            trigger(obj, 'value');
+          },
+        });
+        const obj = {
+          // 当读取value时才执行计算
+          get value() {
+            if (dirty) {
+              cache = effectFn();
+              dirty = false;
+            }
+            // 当读取value的时候手动调用track函数收集外层副作用函数
+            track(obj, 'value');
+            return cache;
+          },
+        };
+
+        return obj;
+      }
+
+      const obj = new Proxy(data, {
+        get(target, key) {
+          track(target, key);
+          return target[key];
+        },
+        set(target, key, newVal) {
+          target[key] = newVal;
+          trigger(target, key);
+        },
+      });
+
+      function track(target, key) {
+        if (!activeEffect) return;
+        let depsMap = bucket.get(target);
+        if (!depsMap) {
+          bucket.set(target, (depsMap = new Map()));
+        }
+        let deps = depsMap.get(key);
+        if (!deps) {
+          depsMap.set(key, (deps = new Set()));
+        }
+        deps.add(activeEffect);
+        activeEffect.deps.push(deps);
+      }
+
+      function trigger(target, key) {
+        const depsMap = bucket.get(target);
+        if (!depsMap) return;
+        const effects = depsMap.get(key);
+        const effectsToRun = new Set();
+        // 如果当前激活的activeEffect与触发重新执行的effect相同则，则不触发执行
+        effects &&
+          effects.forEach((effectFn) => {
+            if (effectFn !== activeEffect) {
+              effectsToRun.add(effectFn);
+            }
+          });
+        effectsToRun.forEach((fn) => {
+          if (fn.options.schedular) {
+            fn.options.schedular(fn);
+          } else {
+            fn();
+          }
+        });
+      }
+
+      function traverse(value, seen = new Set()) {
+        // 如果读取的数据是原始值，或者已经读取过了，则什么都不做
+        if (typeof value !== 'object' || value == null || seen.has(value))
+          return;
+        // 将数据添加到seen中，表示已经读取过
+        seen.add(value);
+        // 不考虑数组，用for...in遍历读取
+        for (const key in value) {
+          traverse(value[key], seen);
+        }
+        return value;
+      }
+
+      function watch(src, cb, options = {}) {
+        let getter;
+        if (typeof src === 'function') {
+          getter = src;
+        } else {
+          getter = () => traverse(src);
+        }
+        let oldValue, newValue;
+        let cleanup;
+        const onInvalidate = (fn) => {
+          cleanup = fn;
+        };
+        const job = () => {
+          if (cleanup) {
+            cleanup();
+          }
+          newValue = effectFn();
+          cb(newValue, oldValue, onInvalidate);
+          oldValue = newValue;
+        };
+        const effectFn = effect(getter, {
+          lazy: true,
+          schedular: () => {
+            // 等待DOM更新完成后执行('pre' 和 'post'原本的语义指的就是组件更新前和更新后)
+            if (options.flush === 'post') {
+              const p = Promise.resolve();
+              p.then(job);
+            } else {
+              // flush: sync 就是同步执行了
+              job();
+            }
+          },
+        });
+        if (options.immediate) {
+          job();
+        } else {
+          oldValue = effectFn();
+        }
+      }
+      // test
+      watch(
+        () => obj.count,
+        async (newV, oldV, onInvalidate) => {
+          let expired = false;
+
+          onInvalidate(() => {
+            expired = true;
+          });
+
+          const res = await new Promise((resolve) => {
+            setTimeout(() => {
+              resolve({
+                data: [{ name: 'artsmp', count: newV }],
+                message: 'ok',
+                code: 0,
+              });
+            }, 1000);
+          });
+
+          if (!expired) {
+            console.log(res);
+          }
+        }
+      );
+
+      obj.count++;
+      setTimeout(() => {
+        obj.count++;
+      }, 2000);
+    </script>
+  </body>
+</html>
