@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>数组的索引和length</title>
+  </head>
+  <body>
+    <p>常规对象和异质对象</p>
+    <h4>对数组元素或属性的读取操作</h4>
+    <ul>
+      <li>通过下标访问元素</li>
+      <li>访问数组的长度</li>
+      <li>把数组作为对象，使用 for...in 遍历</li>
+      <li>使用for...of迭代数组</li>
+      <li>数组所有不改变原数组的方法</li>
+    </ul>
+    <h4>对数组元素或属性的设置操作</h4>
+    <ul>
+      <li>通过下标修改数组</li>
+      <li>修改数组的长度</li>
+      <li>数组的栈方法：pop、push、shift、unshift</li>
+      <li>修改数组的原型方法：splice、sort、fill</li>
+    </ul>
+    <script>
+      const bucket = new WeakMap();
+      let activeEffect;
+      const effectStack = [];
+
+      function cleanup(effectFn) {
+        for (let i = 0; i < effectFn.deps.length; i++) {
+          const deps = effectFn.deps[i];
+          deps.delete(effectFn);
+        }
+        effectFn.deps.length = 0;
+      }
+
+      function effect(fn, options = {}) {
+        const effectFn = () => {
+          cleanup(effectFn);
+          activeEffect = effectFn;
+          effectStack.push(effectFn);
+          // 把fn看做一个getter函数
+          const res = fn();
+          effectStack.pop();
+          activeEffect = effectStack[effectStack.length - 1];
+          return res;
+        };
+        effectFn.deps = [];
+        effectFn.options = options;
+        // 如果懒执行，则默认第一次不会执行
+        if (!options.lazy) {
+          effectFn();
+        }
+        // 返回副作用函数，用户可以手动执行
+        return effectFn;
+      }
+
+      const ITERATE_KEY = Symbol();
+
+      function createReactive(data, isShallow = false, isReadonly = false) {
+        return new Proxy(data, {
+          get(target, key, receiver) {
+            // 当代理对象访问 raw 时，返回被代理对象
+            if (key === 'raw') {
+              return target;
+            }
+            if (!isReadonly && typeof key !== 'symbol') {
+              // 不是只读属性并且key不是symbol类型的:避免对数组的 Symbol[iterator] 建立响应式联系
+              track(target, key);
+            }
+            const res = Reflect.get(target, key, receiver);
+            if (isShallow) {
+              return res;
+            }
+            if (typeof res === 'object' && res !== null) {
+              return isReadonly ? readonly(res) : reactive(res);
+            }
+            return res;
+          },
+          // 当用for...in遍历对象的时候，拦截
+          ownKeys(target) {
+            // 如果是数组我们就使用length作为key
+            track(target, Array.isArray(target) ? 'length' : ITERATE_KEY);
+            return Reflect.ownKeys(target);
+          },
+          // 'foo' in obj 这种情况也要拦截，也算是访问属性
+          has(target, key) {
+            track(target, key);
+            return Reflect.has(target, key);
+          },
+          // delete obj.foo 这种情况
+          deleteProperty(target, key) {
+            if (isReadonly) {
+              console.warn(`属性 ${key} 是只读的！`);
+              return true;
+            }
+
+            const hadKey = Object.prototype.hasOwnProperty.call(target, key);
+            const res = Reflect.deleteProperty(target, key);
+            if (res && hadKey) {
+              // 只有当被删除的属性是对象自己的属性并且删除成功时，才触发更新操作
+              trigger(target, key, 'DELETE');
+            }
+            return res;
+          },
+          set(target, key, newVal, receiver) {
+            if (isReadonly) {
+              console.warn(`属性 ${key} 是只读的！`);
+              return true;
+            }
+
+            const oldVal = target[key];
+            // 如果代理目标是数组，判断当前操作的下标是否大于数组长度，大于的话说明是新增元素，长度变化，否则为修改元素
+            const type = Array.isArray(target)
+              ? Number(key) < target.length
+                ? 'SET'
+                : 'ADD'
+              : Object.prototype.hasOwnProperty.call(target, key)
+              ? 'SET'
+              : 'ADD';
+            const res = Reflect.set(target, key, newVal, receiver);
+            if (target === receiver.raw) {
+              // 只有代理对象等于源对象的时候，才触发更新，避免原型也是响应式对象导致多次触发影响性能
+              if (
+                oldVal !== newVal &&
+                (oldVal === oldVal || newVal === newVal)
+              ) {
+                // 只有当旧值不等于新值，并且新旧值都不为NaN的时候才需要触发更新
+                trigger(target, key, type, newVal);
+              }
+            }
+            return res;
+          },
+        });
+      }
+
+      function reactive(data) {
+        return createReactive(data);
+      }
+
+      function shallowReactive(data) {
+        return createReactive(data, true);
+      }
+
+      function readonly(data) {
+        return createReactive(data, false, true);
+      }
+
+      function shallowReadonly(data) {
+        return createReactive(data, true /* shallow */, true);
+      }
+
+      function track(target, key) {
+        if (!activeEffect) return;
+        let depsMap = bucket.get(target);
+        if (!depsMap) {
+          bucket.set(target, (depsMap = new Map()));
+        }
+        let deps = depsMap.get(key);
+        if (!deps) {
+          depsMap.set(key, (deps = new Set()));
+        }
+        deps.add(activeEffect);
+        activeEffect.deps.push(deps);
+      }
+
+      function trigger(target, key, type, newVal) {
+        const depsMap = bucket.get(target);
+        if (!depsMap) return;
+        const effects = depsMap.get(key);
+        const effectsToRun = new Set();
+        // 如果当前激活的activeEffect与触发重新执行的effect相同则，则不触发执行
+        effects &&
+          effects.forEach((effectFn) => {
+            if (effectFn !== activeEffect) {
+              effectsToRun.add(effectFn);
+            }
+          });
+
+        // 只有当操作类型为 ADD 或者 DELETE 时才触发与 ITERATE_KEY 相关的副作用函数，也就是对象键增加或者减少
+        if (type === 'ADD' || type === 'DELETE') {
+          // 取出与迭代也就是for...in相关联的副作用函数
+          const iterateEffects = depsMap.get(ITERATE_KEY);
+          iterateEffects &&
+            iterateEffects.forEach((effectFn) => {
+              if (effectFn !== activeEffect) {
+                effectsToRun.add(effectFn);
+              }
+            });
+        }
+        // 处理数组的情况
+        if (type === 'ADD' && Array.isArray(target)) {
+          const lengthEffects = depsMap.get('length');
+          lengthEffects &&
+            lengthEffects.forEach((effectFn) => {
+              if (effectFn !== activeEffect) {
+                effectsToRun.add(effectFn);
+              }
+            });
+        }
+        // 如果修改了数组的length属性，假如修改为100，那小于100的key所关联的副作用函数其实完全不用触发更新
+        // 但是高于100的就要了
+        if (Array.isArray(target) && key === 'length') {
+          depsMap.forEach((effects, key) => {
+            if (key >= newVal) {
+              effects.forEach((effectFn) => {
+                if (effectFn !== activeEffect) {
+                  effectsToRun.add(effectFn);
+                }
+              });
+            }
+          });
+        }
+
+        effectsToRun.forEach((fn) => {
+          if (fn.options.schedular) {
+            fn.options.schedular(fn);
+          } else {
+            fn();
+          }
+        });
+      }
+
+      function computed(getter) {
+        // 用来缓存上一次的值
+        let cache;
+        // 是否为脏，脏则需要重新计算
+        let dirty = true;
+        const effectFn = effect(getter, {
+          lazy: true,
+          schedular() {
+            dirty = true;
+            // 当计算属性变化时手动调用trigger函数触发外层函数更新
+            trigger(obj, 'value');
+          },
+        });
+        const obj = {
+          // 当读取value时才执行计算
+          get value() {
+            if (dirty) {
+              cache = effectFn();
+              dirty = false;
+            }
+            // 当读取value的时候手动调用track函数收集外层副作用函数
+            track(obj, 'value');
+            return cache;
+          },
+        };
+
+        return obj;
+      }
+
+      function traverse(value, seen = new Set()) {
+        // 如果读取的数据是原始值，或者已经读取过了，则什么都不做
+        if (typeof value !== 'object' || value == null || seen.has(value))
+          return;
+        // 将数据添加到seen中，表示已经读取过
+        seen.add(value);
+        // 不考虑数组，用for...in遍历读取
+        for (const key in value) {
+          traverse(value[key], seen);
+        }
+        return value;
+      }
+      function watch(src, cb, options = {}) {
+        let getter;
+        if (typeof src === 'function') {
+          getter = src;
+        } else {
+          getter = () => traverse(src);
+        }
+        let oldValue, newValue;
+        let cleanup;
+        const onInvalidate = (fn) => {
+          cleanup = fn;
+        };
+        const job = () => {
+          if (cleanup) {
+            cleanup();
+          }
+          newValue = effectFn();
+          cb(newValue, oldValue, onInvalidate);
+          oldValue = newValue;
+        };
+        const effectFn = effect(getter, {
+          lazy: true,
+          schedular: () => {
+            // 等待DOM更新完成后执行('pre' 和 'post'原本的语义指的就是组件更新前和更新后)
+            if (options.flush === 'post') {
+              const p = Promise.resolve();
+              p.then(job);
+            } else {
+              // flush: sync 就是同步执行了
+              job();
+            }
+          },
+        });
+        if (options.immediate) {
+          job();
+        } else {
+          oldValue = effectFn();
+        }
+      }
+
+      // test2
+      // const arr = reactive(['foo']);
+      // effect(() => {
+      //   console.log(arr[0]);
+      // });
+      // setTimeout(() => {
+      //   arr.length = 0;
+      // }, 1000);
+
+      // test3
+      const arr = reactive(['foo']);
+      effect(() => {
+        for (const key in arr) {
+          console.log(key, arr[key]);
+        }
+      });
+      setTimeout(() => {
+        console.log(bucket);
+        // arr[1] = 'bar'; // 能够触发副作用函数重新执行
+        arr.length = 3; // 能够触发副作用函数重新执行
+      }, 1000);
+    </script>
+  </body>
+</html>
