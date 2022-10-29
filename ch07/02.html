@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>自定义渲染器</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script src="../node_modules/@vue/reactivity/dist/reactivity.global.js"></script>
+    <script>
+      const { ref, effect } = VueReactivity;
+
+      function createRenderer({ createElement, setText, insert }) {
+        function mountElement(vnode, container) {
+          const el = createElement(vnode.type);
+          if (typeof vnode.children === 'string') {
+            setText(el, vnode.children);
+          }
+          insert(el, container);
+        }
+
+        function patch(n1, n2, container) {
+          if (!n1) {
+            // 旧 vnode 不存在意味着挂载
+            mountElement(n2, container);
+          } else {
+            // 打补丁
+          }
+        }
+
+        function renderer(vnode, container) {
+          if (vnode) {
+            patch(container._vnode, vnode, container);
+          } else {
+            if (container._vnode) {
+              // 旧的dom存在，则销毁
+              container.innerHTML = '';
+            }
+          }
+          container._vnode = vnode;
+        }
+        return renderer;
+      }
+
+      const vnode = {
+        type: 'h1',
+        children: 'Hello Renderer',
+      };
+
+      const count = ref(0);
+      const renderer = createRenderer({
+        // 创建dom元素
+        createElement(type) {
+          console.log(`创建一个 ${type} 元素`);
+          return type;
+        },
+        // 设置元素的文本
+        setText(el, text) {
+          console.log(`给 ${el} 元素设置文本内容为『${text}』`);
+        },
+        // 用于在给定的 parent 下添加子元素
+        insert(el, parent, anchor = null) {
+          console.log(`将 ${el} 挂载到 id=app 的元素下`);
+        },
+      });
+      effect(() => {
+        renderer(vnode, document.querySelector('#app'));
+      });
+
+      setTimeout(() => {
+        count.value++;
+      }, 2000);
+    </script>
+  </body>
+</html>
