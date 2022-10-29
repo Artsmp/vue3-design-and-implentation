@@ -7,6 +7,10 @@
     <title>避免无限循环</title>
   </head>
   <body>
+    <p>出现原因：在副作用函数中，又修改了自己</p>
+    <p>
+      解决方案：判断一下当前activeEffect是否等于需要触发执行的effect，若是则跳过不执行即可
+    </p>
     <script>
       const data = { num: 1 };
       const bucket = new WeakMap();

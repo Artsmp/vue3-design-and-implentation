@@ -7,6 +7,22 @@
     <title>实现watch</title>
   </head>
   <body>
+    <p>本质还是一个懒执行和根据调度器实现的 effect</p>
+    <p>
+      首先它第一个参数可以是一个getter函数或者是一个响应式的值，如果是响应式的值会遍历并读取它，触发依赖收集
+    </p>
+    <p>
+      之后就把这个作为effect的副作用函数，并设置lazy为true，再使用调度器，当侦听的值变化时，在调度器中获得新值，并传给watch的第二个函数，然后执行它
+    </p>
+    <p>在调度器中还会把旧值赋给老值</p>
+    <p>当然首次执行watch时会被副作用函数的返回值赋给老值</p>
+    <p>
+      但是如果选项参数里的immediate为true，那就会先执行调度器一次，默认是在第一次监听的值变化时才执行
+    </p>
+    <p>
+      我们还可以设置flush来定义调度器被执行的各种阶段，比如pre，post，默认是sync
+    </p>
+    <p>post的执行方式就是放入微队列中在下一个tick执行</p>
     <script>
       const data = { num: 1, count: 2 };
       const bucket = new WeakMap();

@@ -12,7 +12,10 @@
       const bucket = new WeakMap();
       let activeEffect;
 
+      // 每一次重新执行副作用函数的时候重新依赖收集
       function cleanup(effectFn) {
+        // 这里做的是互相删除，因为现在其实是 key => Set => [effectFn]
+        // effectFn => deps => [Set(text), Set(ok)]
         for (let i = 0; i < effectFn.deps.length; i++) {
           const deps = effectFn.deps[i];
           deps.delete(effectFn);
@@ -21,6 +24,7 @@
       }
       function effect(fn) {
         const effectFn = () => {
+          // 每次触发更新时先清除上一次的依赖
           cleanup(effectFn);
           activeEffect = effectFn;
           fn();
@@ -57,7 +61,12 @@
         const depsMap = bucket.get(target);
         if (!depsMap) return;
         const effects = depsMap.get(key);
+        // 注意 Set 的 forEach：实时更新，假如添加一个又删除一个会导致无限循环
         const effectsToRun = new Set(effects);
+        /* 
+        这边执行副作用函数，Set 中先是被删除上次存储的副作用函数，
+        然后又触发依赖收集，又入了一个副作用函数，导致循环无法结束，所以复制一下上次的快照再执行即可 
+        */
         effectsToRun.forEach((fn) => fn());
       }
 

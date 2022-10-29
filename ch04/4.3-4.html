@@ -11,6 +11,11 @@
       const data = { text: 'hello world', text2: ' hello vue3' };
       const bucket = new WeakMap();
       let activeEffect;
+      /* 
+        当effect嵌套执行的时候，我们不仅需要知道当前正在执行的 effect 是哪一个，
+        还要保存外层的 effect，所以我们需要一个栈结构来存储，
+        执行前入栈，执行完毕后出栈，栈顶元素就是外层effect，也就是之后的activeEffect
+      */
       const effectStack = [];
 
       function cleanup(effectFn) {
@@ -24,8 +29,10 @@
         const effectFn = () => {
           cleanup(effectFn);
           activeEffect = effectFn;
+          // 执行前入栈
           effectStack.push(effectFn);
           fn();
+          // 执行完毕出栈
           effectStack.pop();
           activeEffect = effectStack[effectStack.length - 1];
         };

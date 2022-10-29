@@ -7,6 +7,24 @@
     <title>计算属性computed与lazy</title>
   </head>
   <body>
+    <p>计算属性本质上是一个带缓存的懒执行的effect</p>
+    <ul>
+      <li>
+        接受一个getter函数，这个函数会被作为副作用函数传给 effect，并且该 effect
+        是懒执行的
+      </li>
+      <li>
+        这个effect函数返回副作用函数，然后计算属性会返回一个对象，只有当访问这个对象的value并且dirty为真的时候，才会执行副作用函数并返回结果值
+      </li>
+      <li>返回的结果值会被缓存，同时修改dirty为false</li>
+      <li>
+        effect的调度器每次被触发说明：该computed依赖的值更新了，重新设置dirty为true
+      </li>
+      <li>
+        computed的值更新的时候，也要触发computed属性的副作用函数，使得其值保持最新：所以在
+        get value 中手动收集依赖，在schedular中手动通知更新
+      </li>
+    </ul>
     <script>
       const data = { num: 1, count: 2 };
       const bucket = new WeakMap();

@@ -7,6 +7,15 @@
     <title>实现调度器</title>
   </head>
   <body>
+    <p>
+      调度器：把控制权交给使用者
+      <ul>
+        <li>可以把多次副作用函数执行合并为一次</li>
+        <li>可以用于控制组件重渲染逻辑</li>
+        <li>用于实现computed</li>
+        <li>用于实现watch</li>
+      </ul>
+    </p>
     <script>
       const data = { num: 1 };
       const bucket = new WeakMap();
