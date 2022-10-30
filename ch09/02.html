@@ -7,6 +7,15 @@
     <title>DOM复用以及key的作用</title>
   </head>
   <body>
+    <p>
+      总结：就是对于新旧节点的子节点进行两次for循环，根据key值做对比，
+      找到的话判断找到的子节点的下标是否小于上一次找到的节点的下标，也就是lastIndex，
+      如果小于则进行位置移动，否则把这次的下标作为lastIndex的新值
+    </p>
+    <p>
+      位置移动的方式：从新节点数组中找到当前节点的前一个节点，访问他的真实dom的下一个兄弟元素，作为插入方法的锚点
+      然后执行插入方法，传入要移动的真实dom元素。
+    </p>
     <hr />
     <div id="app"></div>
     <script src="../node_modules/@vue/reactivity/dist/reactivity.global.js"></script>
