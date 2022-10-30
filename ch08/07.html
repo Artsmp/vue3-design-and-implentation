@@ -14,7 +14,7 @@
       const Text = Symbol('文本节点');
       const Comment = Symbol('注释节点');
       const Fragment = Symbol('Fragment节点');
-
+      // 规范化类名
       function normalizeClass(classObj) {
         let classStr = '';
         if (typeof classObj === 'string') {
@@ -35,12 +35,13 @@
         }
         return classStr.trim();
       }
-
+      // 是否以DOM Properties的方式设置属性
       function shouldSetAsProps(el, key, value) {
         // 特殊属性单独处理
         if (key === 'form' && el.tagName === 'INPUT') return false;
         return key in el;
       }
+      // 平台无关渲染器
       function createRenderer({
         createElement,
         setElementText,
@@ -49,6 +50,7 @@
         insert,
         patchProps,
       }) {
+        // 挂载元素
         function mountElement(vnode, container) {
           // 引用真实dom元素，卸载的时候会用到
           const el = (vnode.el = createElement(vnode.type));
@@ -68,7 +70,7 @@
           }
           insert(el, container);
         }
-
+        // 卸载元素
         function unmount(vnode) {
           // 在卸载时，如果卸载的类型是 Fragment，则是卸载其子节点
           if (vnode.type === Fragment) {
@@ -78,7 +80,7 @@
           const parent = el.parentNode;
           if (parent) parent.removeChild(el);
         }
-
+        // 更新子节点
         function patchChildren(n1, n2, container) {
           if (typeof n2.children === 'string') {
             // 新节点的子节点是文本节点，旧节点的子节点是数组，则直接卸载旧节点的所有子节点；其他情况则什么都不用做
@@ -91,7 +93,7 @@
             if (Array.isArray(n1.children)) {
               n1.children.forEach((c) => unmount(c));
               n2.children.forEach((c) => patch(null, c, container));
-              // 核心diff算法 TODO
+              // TODO 核心diff算法
             } else {
               setElementText(container, '');
               n2.children.forEach((c) => patch(null, c, container));
@@ -105,7 +107,7 @@
             }
           }
         }
-
+        // 比较新旧vnode，并更新子节点
         function patchElement(n1, n2) {
           const el = (n2.el = n1.el);
           const oldProps = n1.props;
@@ -124,7 +126,7 @@
           // 2. 更新 children
           patchChildren(n1, n2, el);
         }
-
+        // 比较新旧vnode，并挂载元素到容易中
         function patch(n1, n2, container) {
           if (n1 && n1.type !== n2.type) {
             // 如果新旧 vnode 的类型不同，则直接卸载旧的
@@ -165,6 +167,7 @@
             // 处理其他类型的 vnode
           }
         }
+        // 渲染方法
         function render(vnode, container) {
           if (vnode) {
             patch(container._vnode, vnode, container);
@@ -180,6 +183,7 @@
         };
       }
 
+      // 创建一个渲染器，传入针对特定平台方法以支持不同的平台
       const renderer = createRenderer({
         createElement(type) {
           return document.createElement(type);
