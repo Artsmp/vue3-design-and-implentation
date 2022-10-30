@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>更新子节点</title>
+  </head>
+  <body>
+    分9种情况：
+    <ul>
+      <li>
+        新节点没有子节点
+        <ul>
+          <li>旧节点没有子节点：什么都不用做</li>
+          <li>旧节点一组子节点：调用 unmount 逐个移除</li>
+          <li>旧节点文本子节点：调用 setText 设置为空</li>
+        </ul>
+      </li>
+      <li>
+        新节点为文本节点
+        <ul>
+          <li>旧节点没有子节点：调用 setText 设置为新的文本节点</li>
+          <li>旧节点一组子节点：调用 unmount 逐个移除，再设置新的文本节点</li>
+          <li>旧节点文本子节点：调用 setText 设置为空</li>
+        </ul>
+      </li>
+      <li>
+        新节点为一组子节点
+        <ul>
+          <li>旧节点没有子节点：挨个调用patch挂载</li>
+          <li>
+            旧节点一组子节点：调用 unmount
+            逐个移除，再逐个挂载新节点（暂时做法）
+          </li>
+          <li>旧节点文本子节点：调用 setText 设置为空，挨个调用patch挂载</li>
+        </ul>
+      </li>
+    </ul>
+    <hr />
+    <div id="app"></div>
+    <script src="../node_modules/@vue/reactivity/dist/reactivity.global.js"></script>
+    <script>
+      function normalizeClass(classObj) {
+        let classStr = '';
+        if (typeof classObj === 'string') {
+          classStr = classObj;
+        }
+        if (typeof classObj === 'object' && classObj !== null) {
+          for (const key in classObj) {
+            if (!!classObj[key]) {
+              classStr += `${key} `;
+            }
+          }
+        }
+        if (Array.isArray(classObj)) {
+          classStr = classObj.reduce((str, a) => {
+            str += normalizeClass(a) + ' ';
+            return str;
+          }, '');
+        }
+        return classStr.trim();
+      }
+
+      function shouldSetAsProps(el, key, value) {
+        // 特殊属性单独处理
+        if (key === 'form' && el.tagName === 'INPUT') return false;
+        return key in el;
+      }
+      function createRenderer({ createElement, setText, insert, patchProps }) {
+        function mountElement(vnode, container) {
+          // 引用真实dom元素，卸载的时候会用到
+          const el = (vnode.el = createElement(vnode.type));
+          if (typeof vnode.children === 'string') {
+            setText(el, vnode.children);
+          } else if (Array.isArray(vnode.children)) {
+            // 如果children是数组，则调用patch挂载他们
+            vnode.children.forEach((child) => {
+              patch(null, child, el);
+            });
+          }
+          // 挂载属性
+          if (vnode.props) {
+            for (const key in vnode.props) {
+              patchProps(el, key, null, vnode.props[key]);
+            }
+          }
+          insert(el, container);
+        }
+
+        function unmount(vnode) {
+          const el = vnode.el;
+          const parent = el.parentNode;
+          if (parent) parent.removeChild(el);
+        }
+
+        function patchChildren(n1, n2, container) {
+          if (typeof n2.children === 'string') {
+            // 新节点的子节点是文本节点，旧节点的子节点是数组，则直接卸载旧节点的所有子节点；其他情况则什么都不用做
+            if (Array.isArray(n1.children)) {
+              n1.children.forEach((c) => unmount(c));
+            }
+            setText(container, n2.children);
+          } else if (Array.isArray(n2.children)) {
+            // 新节点是一组数组
+            if (Array.isArray(n1.children)) {
+              n1.children.forEach((c) => unmount(c));
+              n2.children.forEach((c) => patch(null, c, container));
+              // 核心diff算法 TODO
+            } else {
+              setText(container, '');
+              n2.children.forEach((c) => patch(null, c, container));
+            }
+          } else {
+            // 说明新子节点不存在
+            if (Array.isArray(n1.children)) {
+              n1.children.forEach((c) => unmount(c));
+            } else if (typeof n1.children === 'string') {
+              setText(container, '');
+            }
+          }
+        }
+
+        function patchElement(n1, n2) {
+          const el = (n2.el = n1.el);
+          const oldProps = n1.props;
+          const newProps = n2.props;
+          // 1. 更新 props
+          for (const key in newProps) {
+            if (newProps[key] !== oldProps[key]) {
+              patchProps(el, key, oldProps[key], newProps[key]);
+            }
+          }
+          for (const key in oldProps) {
+            if (!(key in newProps)) {
+              patchProps(el, key, oldProps[key], null);
+            }
+          }
+          // 2. 更新 children
+          patchChildren(n1, n2, el);
+        }
+
+        function patch(n1, n2, container) {
+          if (n1 && n1.type !== n2.type) {
+            // 如果新旧 vnode 的类型不同，则直接卸载旧的
+            unmount(n1);
+            n1 = null;
+          }
+          const { type } = n2;
+          if (typeof type === 'string') {
+            // 普通HTML元素
+            if (!n1) {
+              mountElement(n2, container);
+            } else {
+              // 更新
+              patchElement(n1, n2);
+            }
+          } else if (typeof type === 'object') {
+            // 如果 n2 的类型是对象，则说明是组件
+          } else {
+            // 处理其他类型的 vnode
+          }
+        }
+        function render(vnode, container) {
+          if (vnode) {
+            patch(container._vnode, vnode, container);
+          } else {
+            if (container._vnode) {
+              unmount(container._vnode);
+            }
+          }
+          container._vnode = vnode;
+        }
+        return {
+          render,
+        };
+      }
+
+      const renderer = createRenderer({
+        createElement(type) {
+          return document.createElement(type);
+        },
+        setText(el, text) {
+          el.textContent = text;
+        },
+        insert(el, parent, anchor = null) {
+          parent.insertBefore(el, anchor);
+        },
+        patchProps(el, key, preValue, nextValue) {
+          if (/^on/.test(key)) {
+            let invokers = el._vei || (el._vei = {});
+            let invoker = invokers[key];
+            // 处理事件
+            const name = key.slice(2).toLowerCase();
+            if (nextValue) {
+              if (!invoker) {
+                invoker = el._vei[key] = (e) => {
+                  // 如果事件触发的时间早于事件绑定的时间，则不执行事件处理函数（冒泡）
+                  if (e.timeStamp < invoker.attached) return;
+                  if (Array.isArray(invoker.value)) {
+                    invoker.value.forEach((fn) => fn(e));
+                    return;
+                  }
+                  invoker.value(e);
+                };
+                invoker.value = nextValue;
+                // 记录事件绑定时的时间
+                invoker.attached = performance.now();
+                el.addEventListener(name, invoker);
+              } else {
+                // 如果 invoker 存在，意味着更新，并且只需要更新 invoker.value 的值即可，避免了解绑事件带来的性能损耗
+                invoker.value = nextValue;
+              }
+            } else if (invoker) {
+              // 新的绑定事件不存在，则表示移除绑定事件
+              el.removeEventListener(name, invoker);
+            }
+          } else if (key === 'class') {
+            el.className = nextValue || '';
+          } else if (shouldSetAsProps(el, key, nextValue)) {
+            // 判断是否存在这个 DOM Properties
+            const type = typeof el[key];
+            if (type === 'boolean' && nextValue === '') {
+              // 如果类型是布尔类型，且传进来的值是空串，设置为true（特殊情况）
+              el[key] = true;
+            } else {
+              el[key] = nextValue;
+            }
+          } else {
+            el.setAttribute(key, nextValue);
+          }
+        },
+      });
+
+      // test
+      // const vnode = {
+      //   type: 'p',
+      //   props: {
+      //     id: 'foo',
+      //     onClick: [
+      //       (e) => {
+      //         console.log('foo eeeeee');
+      //       },
+      //       (e) => {
+      //         console.log('foo 22222');
+      //       },
+      //     ],
+      //     onContextmenu(e) {
+      //       console.log('onContextmenu');
+      //     },
+      //   },
+      //   children: [
+      //     {
+      //       type: 'h1',
+      //       children: 'Hello World',
+      //     },
+      //   ],
+      // };
+
+      // renderer.render(vnode, document.querySelector('#app'));
+
+      // test2 事件冒泡与更新时机问题
+      const { effect, ref } = VueReactivity;
+      const bol = ref(false);
+      effect(() => {
+        const vnode = {
+          type: 'div',
+          props: bol.value
+            ? {
+                onClick(e) {
+                  console.log('div click');
+                },
+              }
+            : {},
+          children: [
+            {
+              type: 'p',
+              props: {
+                onClick(e) {
+                  console.log('p click');
+                  bol.value = true;
+                },
+              },
+              children: 'text',
+            },
+          ],
+        };
+        renderer.render(vnode, document.querySelector('#app'));
+      });
+    </script>
+  </body>
+</html>

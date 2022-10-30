@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>区分vnode的类型</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script src="../node_modules/@vue/reactivity/dist/reactivity.global.js"></script>
+    <script>
+      function normalizeClass(classObj) {
+        let classStr = '';
+        if (typeof classObj === 'string') {
+          classStr = classObj;
+        }
+        if (typeof classObj === 'object' && classObj !== null) {
+          for (const key in classObj) {
+            if (!!classObj[key]) {
+              classStr += `${key} `;
+            }
+          }
+        }
+        if (Array.isArray(classObj)) {
+          classStr = classObj.reduce((str, a) => {
+            str += normalizeClass(a) + ' ';
+            return str;
+          }, '');
+        }
+        return classStr.trim();
+      }
+
+      function shouldSetAsProps(el, key, value) {
+        // 特殊属性单独处理
+        if (key === 'form' && el.tagName === 'INPUT') return false;
+        return key in el;
+      }
+      function createRenderer({ createElement, setText, insert, patchProps }) {
+        function mountElement(vnode, container) {
+          // 引用真实dom元素，卸载的时候会用到
+          const el = (vnode.el = createElement(vnode.type));
+          if (typeof vnode.children === 'string') {
+            setText(el, vnode.children);
+          } else if (Array.isArray(vnode.children)) {
+            // 如果children是数组，则调用patch挂载他们
+            vnode.children.forEach((child) => {
+              patch(null, child, el);
+            });
+          }
+          // 挂载属性
+          if (vnode.props) {
+            for (const key in vnode.props) {
+              patchProps(el, key, null, vnode.props[key]);
+            }
+          }
+          insert(el, container);
+        }
+
+        function unmount(vnode) {
+          const el = vnode.el;
+          const parent = el.parentNode;
+          if (parent) parent.removeChild(el);
+        }
+
+        function patchElement(vnode, container) {}
+
+        function patch(n1, n2, container) {
+          if (n1 && n1.type !== n2.type) {
+            // 如果新旧 vnode 的类型不同，则直接卸载旧的
+            unmount(n1);
+            n1 = null;
+          }
+          const { type } = n2;
+          if (typeof type === 'string') {
+            // 普通HTML元素
+            if (!n1) {
+              mountElement(n2, container);
+            } else {
+              // 更新
+              patchElement(n2, container);
+            }
+          } else if (typeof type === 'object') {
+            // 如果 n2 的类型是对象，则说明是组件
+          } else {
+            // 处理其他类型的 vnode
+          }
+        }
+        function render(vnode, container) {
+          if (vnode) {
+            patch(container._vnode, vnode, container);
+          } else {
+            if (container._vnode) {
+              unmount(container._vnode);
+            }
+          }
+          container._vnode = vnode;
+        }
+        return {
+          render,
+        };
+      }
+
+      const renderer = createRenderer({
+        createElement(type) {
+          return document.createElement(type);
+        },
+        setText(el, text) {
+          el.textContent = text;
+        },
+        insert(el, parent, anchor = null) {
+          parent.insertBefore(el, anchor);
+        },
+        patchProps(el, key, preValue, nextValue) {
+          if (shouldSetAsProps(el, key, nextValue)) {
+            // 对class进行特殊处理
+            if (key === 'class') {
+              el.className = nextValue || '';
+            }
+            // 判断是否存在这个 DOM Properties
+            const type = typeof el[key];
+            if (type === 'boolean' && nextValue === '') {
+              // 如果类型是布尔类型，且传进来的值是空串，设置为true（特殊情况）
+              el[key] = true;
+            } else {
+              el[key] = nextValue;
+            }
+          } else {
+            el.setAttribute(key, nextValue);
+          }
+        },
+      });
+
+      // test
+      const vnode = {
+        type: 'p',
+        props: {
+          id: 'foo',
+          class: normalizeClass([
+            'foo',
+            {
+              bar: true,
+              baz: true,
+            },
+          ]),
+        },
+        children: [
+          {
+            type: 'h1',
+            children: 'Hello World',
+          },
+          {
+            type: 'button',
+            props: {
+              disabled: true,
+            },
+            children: 'button',
+          },
+        ],
+      };
+
+      renderer.render(vnode, document.querySelector('#app'));
+      setTimeout(() => {
+        renderer.render(null, document.querySelector('#app'));
+      }, 2000);
+    </script>
+  </body>
+</html>
