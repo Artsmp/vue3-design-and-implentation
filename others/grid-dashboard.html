@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      #dashboard {
+        display: grid;
+        height: 100vh;
+        grid-template-areas:
+          'nav header header'
+          'nav content content';
+        grid-template-rows: 80px 1fr;
+        grid-template-columns: 200px 1fr;
+        overflow: hidden;
+      }
+      nav {
+        background: rebeccapurple;
+        grid-area: nav;
+      }
+      header {
+        background: darkcyan;
+        grid-area: header;
+      }
+      main {
+        background: violet;
+        grid-area: content;
+        overflow-y: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="dashboard">
+      <nav></nav>
+      <header></header>
+      <main>
+        <div style="height: 3000px"></div>
+      </main>
+    </div>
+  </body>
+</html>
