@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <script>
+      Promise.resolve()
+        .then(function function0() {
+          console.log(0);
+          return Promise.resolve(4);
+        })
+        .then(function functionRes(res) {
+          console.log(res);
+        });
+
+      Promise.resolve()
+        .then(function function1() {
+          console.log(1);
+        })
+        .then(function function2() {
+          console.log(2);
+        })
+        .then(function function3() {
+          console.log(3);
+        })
+        .then(function function5() {
+          console.log(5);
+        })
+        .then(function function6() {
+          console.log(6);
+        });
+
+      function MyPromise(exec) {
+        this.onResolvedCbs = [];
+        exec((value) => {
+          setTimeout(() => {
+            this.data = value;
+            this.onResolvedCbs.forEach((item) => item(value));
+          });
+        });
+      }
+      MyPromise.prototype.then = function (onResolved) {
+        return new MyPromise((resolve) => {
+          this.onResolvedCbs.push(() => {
+            const result = onResolved(this.data);
+            result instanceof MyPromise
+              ? result.then(resolve)
+              : resolve(result);
+          });
+        });
+      };
+    </script>
+  </body>
+</html>
